@@ -1,0 +1,7 @@
+---
+- name: postgresql
+  hosts: 34.219.127.196
+  become: yes
+  tasks:
+  - name: install and setup postgresql
+    script: /home/vagrant/ansible/postgresql/postgresql.sh

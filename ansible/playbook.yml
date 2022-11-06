@@ -1,0 +1,203 @@
+---
+# Deploying my Laravel project
+- name: Deploy my app
+  hosts: Webservers
+  become: true
+  remote_user: root
+  vars:
+     db_user: ohiani
+     db_password: 12345
+
+  tasks:
+    - name: Update server
+      command: apt update
+
+    # Install Apache 2
+
+    - name: Install Apache 2
+      command: apt install apache2 -y
+
+    - name: Start apache
+      command: systemctl start apache2
+
+    - name: enable apache
+      command: systemctl enable apache2
+
+    # install Php
+
+    - name: Install software packages
+      command: apt install software-properties-common
+
+    - name: Add repository
+      apt_repository:
+        repo="ppa:ondrej/php" state=present
+
+    - name: updating repo
+      apt: update_cache=yes
+
+    - name: install php8.1
+      apt: name=php8.1 state=present
+
+    - name: Installing php extensions
+      package:
+         name: "{{item}}"
+         state: present
+         update_cache: yes
+      loop:
+        - openssl
+        - php-common
+        - php-curl
+        - php-json
+        - php-mbstring
+        - php-mysql
+        - php-xml
+        - php-zip
+      become: yes
+
+
+    # install and setup mysql
+
+    - name: Installing Mysql and dependencies
+      package:
+         name: "{{item}}"
+         state: present
+         update_cache: yes
+      loop:
+         - mysql-server
+         - mysql-client
+         - python3-mysqldb
+         - libmysqlclient-dev
+      become: yes
+
+    - name: start and enable mysql
+      service:
+         name: mysql
+         state: started
+         enabled: yes
+
+    - name: creating mysql user
+      mysql_user:
+         name: "{{db_user}}"
+         password: "{{db_password}}"
+         priv: '*.*:ALL'
+         host: '%'
+         state: present
+
+    - name: creating database
+      mysql_db:
+         name: laraveldb
+         state: present
+
+    - name: Restarting mysql
+      command: systemctl restart mysql
+
+    # Install composer
+
+    - name: Download php-composer
+      get_url:
+        url: https://getcomposer.org/installer
+        dest: /tmp/installer
+
+    - name: install composer
+      shell: cat /tmp/installer | php -- --install-dir=/usr/local/bin
+      args:
+         creates: /usr/local/bin/composer
+
+    - name: rename composer.phar to composer
+      shell: mv /usr/local/bin/composer.phar /usr/local/bin/composer
+      args:
+         creates: /usr/local/bin/composer
+
+    - name: make composer executable
+      file:
+        path: /usr/local/bin/composer
+        mode: a+x
+        state: file
+
+    # clone project from github
+
+    - name: install git
+      command: apt install git
+
+    - name: configure git
+      command: git config --global user.name "Momoh"
+
+    - name: configure git
+      command: git config --global user.email "momohridwan@gmail.com"
+
+    - name: clone project from git repository
+      command: git clone "https://github.com/f1amy/laravel-realworld-example-app.git"
+
+    # permissions and moving
+
+    - name: rename the project
+      command: mv laravel-realworld-example-app App
+
+    - name: move directory
+      command: mv App /var/www/html/
+
+    - name: give required ownership
+      command: chown -R www-data:www-data /var/www/html/App
+
+    - name: give required permission
+      command: chmod -R 775 /var/www/html/App/storage
+
+    - name: copy .env from localhost to server
+      copy:
+         src: /home/vagrant/ansible/env.env
+         dest: /var/www/html/App/env.env
+
+    # Generate artisan key and migrate
+
+    - name: delete .env.example
+      file: name=/var/www/html/App/.env.example state=absent
+
+    - name: Composer update
+      script: /home/vagrant/ansible/composer_update.sh
+      args:
+         chdir: /var/www/html/App
+
+    - name: Composer install
+      script: /home/vagrant/ansible/composer.sh
+      args:
+         chdir: /var/www/html/App
+
+    - name: php artisan
+      command: php artisan key:generate
+      args:
+         chdir: /var/www/html/App/
+
+    - name: artisan migrate
+      command: php artisan migrate
+      args:
+        chdir: /var/www/html/App/
+
+    # Edit the web.php file
+
+    - name: delete web.php
+      command: rm /var/www/html/App/routes/web.php
+
+    - name: copy and replace web.php
+      copy:
+        src: /home/vagrant/ansible/web.php
+        dest: /var/www/html/App/routes/web.php
+
+    # create an apache config file
+
+    - name: copy and paste new config file
+      copy:
+        src: /home/vagrant/ansible/new.conf
+        dest: /etc/apache2/sites-available/new.conf
+
+    - name: disable default apache config
+      command: a2dissite 000-default.conf
+
+    - name: enable new config file
+      command: a2ensite new.conf
+
+    - name: modify apache
+      command: a2enmod rewrite
+
+    - name: reload apache
+      command: systemctl reload apache2
+
